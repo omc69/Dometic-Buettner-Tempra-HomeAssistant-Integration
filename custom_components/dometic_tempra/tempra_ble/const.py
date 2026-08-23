@@ -63,9 +63,23 @@ HANDSHAKE_DELAY: Final = 0.12
 #: exactly "APP+AEN=f560f1deba" with no trailing CR or LF.
 HANDSHAKE_TERMINATOR: Final = ""
 
-#: How long to wait for the battery to say anything at all after a handshake
-#: before treating that attempt's variant as wrong.
+#: How long to wait for the battery to say anything at all after a handshake.
 HANDSHAKE_REPLY_TIMEOUT: Final = 6.0
+
+#: How long to stay connected collecting frames before giving up on a complete
+#: snapshot. The battery streams every field within a second or two once
+#: APP+DAT is acknowledged, so this is generous.
+SNAPSHOT_TIMEOUT: Final = 20.0
+
+#: Gap between polls of one battery. Batteries take turns on the adapter, so
+#: with a bank of three the effective cycle is this plus the time the other
+#: batteries hold the radio. Battery state changes slowly; a reading a minute
+#: is plenty and keeps the radio quiet the rest of the time.
+POLL_INTERVAL: Final = 60.0
+
+#: Entities stay available this long after the last complete reading, so a
+#: single missed turn does not blank the dashboard.
+DATA_STALE_AFTER: Final = 300.0
 
 #: The handshake in the order the Dometic app sends it. Telemetry starts the
 #: moment ``APP+DAT`` is acknowledged; ``APP+IMP`` and ``APP+RDN=1`` follow in

@@ -28,7 +28,7 @@ async def async_get_config_entry_diagnostics(
             "address": state.address,
             "name": state.name,
             "serial": state.serial,
-            "connected": coordinator.device.connected,
+            "available": coordinator.device.available,
         },
         "measurements": state.as_dict(),
         "undecoded_frames": {

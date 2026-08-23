@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from homeassistant.components import bluetooth
 from homeassistant.const import CONF_ADDRESS
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryNotReady
 
-from .const import CONF_AUTH_TOKEN, PLATFORMS
+from .const import CONF_AUTH_TOKEN, DOMAIN, PLATFORMS
 from .coordinator import TempraConfigEntry, TempraCoordinator
 from .tempra_ble import DEFAULT_AUTH_TOKEN
 from .tempra_ble.device import TempraBleDevice
@@ -29,6 +30,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: TempraConfigEntry) -> bo
 
     device = TempraBleDevice(
         ble_device,
+        radio=_async_radio_lock(hass),
         auth_token=entry.options.get(CONF_AUTH_TOKEN, DEFAULT_AUTH_TOKEN),
         name=entry.title,
     )
@@ -39,6 +41,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: TempraConfigEntry) -> bo
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(_async_reload_entry))
     return True
+
+
+@callback
+def _async_radio_lock(hass: HomeAssistant) -> asyncio.Lock:
+    """One lock shared by every battery, so they take turns on the adapter.
+
+    Three simultaneous GATT links to batteries at -72 to -88 dBm are not
+    reliable on a Raspberry Pi's onboard radio: whichever battery came third
+    would fail, and which one it was rotated between runs. Serialising the
+    connections removes the contention.
+    """
+    return hass.data.setdefault(DOMAIN, {}).setdefault("radio", asyncio.Lock())
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: TempraConfigEntry) -> bool:

@@ -48,8 +48,8 @@ class TempraCoordinator(DataUpdateCoordinator[TempraState]):
 
     @property
     def available(self) -> bool:
-        """Whether the battery is delivering telemetry."""
-        return self.device.connected
+        """Whether the most recent reading is recent enough to trust."""
+        return self.device.available
 
     async def async_start(self) -> None:
         """Begin connecting and watch for advertisements."""
@@ -81,13 +81,13 @@ class TempraCoordinator(DataUpdateCoordinator[TempraState]):
         service_info: bluetooth.BluetoothServiceInfoBleak,
         change: bluetooth.BluetoothChange,
     ) -> None:
-        """Adopt the freshest BLEDevice and retry sooner if we are offline.
+        """Adopt the freshest BLEDevice, and poll sooner if we have no data.
 
-        The battery keeps advertising while disconnected, so an advertisement
-        is the earliest reliable signal that a reconnect can succeed -- much
-        better than waiting out the backoff after e.g. the Dometic app has
-        released the single available connection slot.
+        The battery advertises continuously, so an advertisement is the
+        earliest reliable sign that a poll can succeed -- better than waiting
+        out the backoff after e.g. the Dometic app has released the battery's
+        single connection slot.
         """
         self.device.set_ble_device(service_info.device)
-        if not self.device.connected:
-            self.device.request_reconnect()
+        if not self.device.available:
+            self.device.request_poll()
