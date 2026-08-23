@@ -1,0 +1,15 @@
+{
+  "entity": {
+    "sensor": {
+      "soh": {
+        "default": "mdi:heart-pulse"
+      },
+      "capacity_ah": {
+        "default": "mdi:battery-charging-100"
+      },
+      "cell_voltage": {
+        "default": "mdi:battery-outline"
+      }
+    }
+  }
+}

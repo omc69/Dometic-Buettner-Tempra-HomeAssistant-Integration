@@ -1,0 +1,52 @@
+{
+  "config": {
+    "flow_title": "{name}",
+    "step": {
+      "user": {
+        "description": "Choose the Tempra battery to add.",
+        "data": {
+          "address": "Battery"
+        }
+      },
+      "confirm": {
+        "description": "Do you want to set up {name}?"
+      }
+    },
+    "abort": {
+      "already_configured": "This battery is already configured",
+      "no_devices_found": "No Tempra battery found in range. Make sure the battery is powered and the Dometic app is not connected — the battery allows only one Bluetooth connection at a time."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "description": "Advanced settings. Only change the handshake token if a Bluetooth capture shows a different value.",
+        "data": {
+          "auth_token": "Handshake token"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "voltage": {
+        "name": "Voltage"
+      },
+      "current": {
+        "name": "Current"
+      },
+      "power": {
+        "name": "Power"
+      },
+      "soh": {
+        "name": "State of health"
+      },
+      "capacity_ah": {
+        "name": "Rated capacity"
+      },
+      "cell_voltage": {
+        "name": "Cell {cell} voltage"
+      }
+    }
+  }
+}

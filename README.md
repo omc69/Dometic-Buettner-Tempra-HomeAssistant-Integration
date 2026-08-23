@@ -1,0 +1,129 @@
+<img src="icon.png" width="96" align="right" alt="Dometic">
+
+# Dometic Büttner Tempra — Home Assistant Integration
+
+Reads **Dometic Büttner Tempra TLB150** LiFePO₄ batteries over Bluetooth LE and
+exposes them as native Home Assistant sensors. No MQTT broker, no add-on, no
+cloud — the integration talks to the battery directly through Home Assistant's
+own Bluetooth stack.
+
+The BLE protocol was reverse engineered from HCI traces; the full write-up is in
+[`docs/dometic_tempra_ble_protocol.md`](docs/dometic_tempra_ble_protocol.md).
+
+## Sensors
+
+| Sensor | Unit | Notes |
+|---|---|---|
+| Voltage | V | pack voltage |
+| Current | A | negative = discharge, positive = charge |
+| Power | W | derived as `voltage × current` — the battery does not transmit it, and the Dometic app computes it the same way |
+| Battery | % | state of charge |
+| State of health | % | diagnostic |
+| Rated capacity | Ah | diagnostic, 150 Ah on a TLB150 |
+| Cell 1–4 voltage | mV | diagnostic, useful for spotting drift in the 4S pack |
+
+Values are **pushed**, not polled: after the handshake the battery streams
+continuously, so entities update as fast as the battery sends.
+
+## Requirements
+
+- Home Assistant 2025.2 or newer with the `bluetooth` integration set up
+- A **connectable** Bluetooth adapter in range of the battery — the host's own
+  adapter or an ESPHome Bluetooth proxy. Passive-only proxies (e.g. a Shelly BLU
+  Gateway) can see the battery advertise but cannot connect to it.
+
+## Installation
+
+**HACS** → ⋮ → *Custom repositories* → add
+`https://github.com/omc69/Dometic-Buettner-Tempra-HomeAssistant-Integration`
+as category *Integration* → install → restart Home Assistant.
+
+Or copy `custom_components/dometic_tempra/` into your `config/custom_components/`
+and restart.
+
+Batteries advertise as `KAA_<serial>_TLB150` and are discovered automatically —
+**Settings → Devices & Services** will offer them. Add each battery separately.
+
+## The one-connection rule
+
+A TLB150 accepts **exactly one BLE connection at a time**. That has practical
+consequences:
+
+- While Home Assistant is connected, the **Dometic phone app cannot connect**,
+  and vice versa. Closing the app frees the slot; the integration notices the
+  next advertisement and reconnects without waiting out its backoff.
+- Anything else on the same host that scans for and connects to BMS devices
+  will fight for the same slot. If you run the **Batmon** add-on or a similar
+  BLE battery monitor, exclude the Tempra batteries there.
+
+Losing the connection is expected and handled: the integration reconnects with
+backoff, re-runs the handshake, and marks entities unavailable while the stream
+is down or has stalled for more than 90 seconds.
+
+## Troubleshooting
+
+Turn on debug logging:
+
+```yaml
+logger:
+  default: warning
+  logs:
+    custom_components.dometic_tempra: debug
+```
+
+**Settings → Devices & Services → Dometic Büttner Tempra → ⋮ → Download
+diagnostics** dumps the current measurements *plus the raw payload of every
+command that is not decoded yet* — see [open items](#open-protocol-items).
+
+## Development
+
+The protocol layer under `custom_components/dometic_tempra/tempra_ble/` has no
+Home Assistant imports, and everything except `device.py` has no third-party
+imports at all, so decoding is testable on its own:
+
+```bash
+python -m venv .venv && .venv/bin/pip install -r requirements_test.txt
+.venv/bin/python -m pytest tests/ -q
+```
+
+Every byte sequence in `tests/test_parser.py` comes from a real capture,
+together with the value the Dometic app displayed at that moment.
+
+### Live capture tool
+
+`tools/tempra_dump.py` runs the same handshake and parser outside Home
+Assistant, which is the fastest way to work on the undecoded registers:
+
+```bash
+pip install bleak
+python tools/tempra_dump.py --list
+python tools/tempra_dump.py --address AA:BB:CC:DD:EE:FF --raw
+```
+
+Stop the integration first — one connection, remember.
+
+## Open protocol items
+
+Decoded and verified: voltage, current, SOC, SOH, capacity, cell voltages.
+Still open (section 4.2 of the protocol document):
+
+| Command | Hypothesis | How to pin it down |
+|---|---|---|
+| `0x34`, `0x35` | temperature, uncalibrated | correlate against the app's temperature reading |
+| `0x36` | internal resistance or peak current | sweep discharge load in steps and log |
+| `0x60` | status bitfield (poles status, internal regulator) | toggle shore power while capturing |
+| `0x90`, `0xA0`, `0xA1`, `0xC0`, `0xF1`, `0xF2` | alarm registers | only ever seen in the no-alarm state |
+
+The diagnostics dump and `tools/tempra_dump.py --raw` both surface these raw
+payloads. PRs with captures welcome.
+
+## Disclaimer
+
+Not affiliated with, endorsed by, or supported by Dometic or Büttner
+Elektronik. "Dometic" and the Dometic logo are trademarks of their respective
+owners and are used here only to identify the compatible hardware. Use at your
+own risk.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
