@@ -2,6 +2,10 @@
 
 # Dometic Büttner Tempra — Home Assistant Integration
 
+[![hacs](https://img.shields.io/badge/HACS-custom-41BDF5.svg)](https://hacs.xyz)
+[![release](https://img.shields.io/github/v/release/omc69/Dometic-Buettner-Tempra-HomeAssistant-Integration)](https://github.com/omc69/Dometic-Buettner-Tempra-HomeAssistant-Integration/releases)
+[![validate](https://github.com/omc69/Dometic-Buettner-Tempra-HomeAssistant-Integration/actions/workflows/validate.yml/badge.svg)](https://github.com/omc69/Dometic-Buettner-Tempra-HomeAssistant-Integration/actions/workflows/validate.yml)
+
 Reads **Dometic Büttner Tempra TLB150** LiFePO₄ batteries over Bluetooth LE and
 exposes them as native Home Assistant sensors. No MQTT broker, no add-on, no
 cloud — the integration talks to the battery directly through Home Assistant's
@@ -65,12 +69,23 @@ why, which boards work, and the one ESPHome setting that is easy to miss.
 
 ## Installation
 
-**HACS** → ⋮ → *Custom repositories* → add
-`https://github.com/omc69/Dometic-Buettner-Tempra-HomeAssistant-Integration`
-as category *Integration* → install → restart Home Assistant.
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=omc69&repository=Dometic-Buettner-Tempra-HomeAssistant-Integration&category=integration)
 
-Or copy `custom_components/dometic_tempra/` into your `config/custom_components/`
-and restart.
+The button adds this repository to HACS on your own Home Assistant. Then
+**Download**, and restart Home Assistant.
+
+By hand, if you prefer: **HACS** → ⋮ → *Custom repositories* → add
+`https://github.com/omc69/Dometic-Buettner-Tempra-HomeAssistant-Integration` as category *Integration* → install →
+restart. Or copy `custom_components/dometic_tempra/` into your
+`config/custom_components/` and restart.
+
+Once it is installed and Home Assistant has restarted:
+
+[![Open your Home Assistant instance and start setting up a new integration.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=dometic_tempra)
+
+Batteries in range are usually discovered on their own, in which case they are
+waiting for you under **Settings → Devices & Services** and neither button is
+needed.
 
 ## Adding batteries
 
