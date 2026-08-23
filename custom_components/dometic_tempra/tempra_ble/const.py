@@ -20,6 +20,13 @@ WRITE_CHAR_UUID: Final = "00000001-0000-1000-8000-008025000000"
 #: Notify characteristic, carries ASCII replies *and* binary telemetry.
 NOTIFY_CHAR_UUID: Final = "00000002-0000-1000-8000-008025000000"
 
+#: Write-with-response characteristic. The Dometic app writes a single ``C8``
+#: byte here during setup (section 2 of the protocol document, purpose
+#: unrecorded). We had been skipping it. Unlike the ASCII command channel this
+#: one acknowledges, so a rejection here is visible instead of silent.
+SESSION_CHAR_UUID: Final = "00000003-0000-1000-8000-008025000000"
+SESSION_OPEN_VALUE: Final = b"\xc8"
+
 #: Do NOT subscribe to 0x000A or 0x0004. Both are Indicate, not Notify, and
 #: enabling indications on 0x000A makes the battery hang up ~1.2 s later --
 #: reproduced on consecutive attempts against KAA_502269_TLB150, before the

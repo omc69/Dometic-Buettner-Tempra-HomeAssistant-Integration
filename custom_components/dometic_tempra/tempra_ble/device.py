@@ -26,6 +26,8 @@ from .const import (
     HANDSHAKE_REPLY_TIMEOUT,
     HANDSHAKE_TERMINATORS,
     NOTIFY_CHAR_UUID,
+    SESSION_CHAR_UUID,
+    SESSION_OPEN_VALUE,
     UNDECODED_COMMANDS,
     WRITE_CHAR_UUID,
 )
@@ -205,10 +207,10 @@ class TempraBleDevice:
         )
         self._client = client
         self._log_gatt_table(client)
-        await self._async_pair(client)
 
         self._any_notification.clear()
         await client.start_notify(NOTIFY_CHAR_UUID, self._on_notification)
+        await self._async_open_session(client)
         terminator = await self._async_handshake(client)
 
         # The write characteristic is write-without-response, so a command the
@@ -255,22 +257,24 @@ class TempraBleDevice:
                 continue
             return
 
-    async def _async_pair(self, client: BleakClientWithServiceCache) -> None:
-        """Best-effort pairing before the handshake.
+    async def _async_open_session(self, client: BleakClientWithServiceCache) -> None:
+        """Write the single C8 byte the Dometic app writes during setup.
 
-        "AEN" reads as Auth ENable, and iOS pairs on its own the moment a
-        characteristic demands it -- so the captures would not show a pairing
-        step even if the battery requires an encrypted link. On BlueZ nothing
-        pairs implicitly, which would leave every write silently discarded.
-        Failures here are not fatal: plenty of adapters and devices refuse or
-        do not need it.
+        Its meaning is unrecorded, but the app does it on every connection and
+        we did not, while the battery hangs up about 1.2 s after connecting
+        without ever answering a command. Unlike the ASCII command channel this
+        characteristic is write-with-response, so a rejection surfaces as an
+        exception instead of being silently dropped -- which makes this the
+        first step in the sequence that can actually be verified.
         """
         try:
-            paired = await client.pair()
-        except (BleakError, NotImplementedError, EOFError, OSError) as err:
-            _LOGGER.debug("%s: pairing unavailable (%s)", self._name, err)
+            await client.write_gatt_char(
+                SESSION_CHAR_UUID, SESSION_OPEN_VALUE, response=True
+            )
+        except (BleakError, TimeoutError, OSError) as err:
+            _LOGGER.warning("%s: session open write rejected: %s", self._name, err)
         else:
-            _LOGGER.debug("%s: pairing returned %s", self._name, paired)
+            _LOGGER.debug("%s: session open write acknowledged", self._name)
 
     async def _async_handshake(self, client: BleakClientWithServiceCache) -> str:
         """Run the mandatory command sequence that unlocks the data stream.
