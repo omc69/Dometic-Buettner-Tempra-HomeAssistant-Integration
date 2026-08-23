@@ -20,14 +20,10 @@ WRITE_CHAR_UUID: Final = "00000001-0000-1000-8000-008025000000"
 #: Notify characteristic, carries ASCII replies *and* binary telemetry.
 NOTIFY_CHAR_UUID: Final = "00000002-0000-1000-8000-008025000000"
 
-#: The Dometic app also subscribes to these two in every capture; their purpose
-#: is undocumented. Subscribing is passive, mirrors what the app does, and means
-#: telemetry arriving on the "wrong" characteristic is still seen instead of
-#: silently missed. Failures to subscribe are ignored.
-EXTRA_NOTIFY_UUIDS: Final = (
-    "0000000a-0000-1000-8000-008025000000",
-    "00000004-0000-1000-8000-008025000000",
-)
+#: Do NOT subscribe to 0x000A or 0x0004. Both are Indicate, not Notify, and
+#: enabling indications on 0x000A makes the battery hang up ~1.2 s later --
+#: reproduced on consecutive attempts against KAA_502269_TLB150, before the
+#: first handshake write even went out.
 
 # --- Advertising -----------------------------------------------------------
 
@@ -44,6 +40,18 @@ DEFAULT_AUTH_TOKEN: Final = "f560f1deba"
 #: The app spaces its handshake writes out; without the gaps the battery
 #: drops commands (presumably a write-queue overflow on its side).
 HANDSHAKE_DELAY: Final = 0.3
+
+#: The handshake in the order the Dometic app sends it. ``APP+IMP`` is step 4
+#: of the documented sequence; the handover pseudocode left it out, and the
+#: battery hangs up a few seconds after the shortened sequence without ever
+#: sending telemetry. ``{token}`` is substituted with the auth token.
+HANDSHAKE_COMMANDS: Final = (
+    "APP+AEN={token}",
+    "APP+NET",
+    "APP+DAT",
+    "APP+IMP",
+    "APP+RDN=1",
+)
 
 # --- Binary framing --------------------------------------------------------
 

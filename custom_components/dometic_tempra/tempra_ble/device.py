@@ -21,7 +21,7 @@ from bleak_retry_connector import BleakClientWithServiceCache, establish_connect
 
 from .const import (
     DEFAULT_AUTH_TOKEN,
-    EXTRA_NOTIFY_UUIDS,
+    HANDSHAKE_COMMANDS,
     HANDSHAKE_DELAY,
     NOTIFY_CHAR_UUID,
     UNDECODED_COMMANDS,
@@ -198,12 +198,6 @@ class TempraBleDevice:
         self._log_gatt_table(client)
 
         await client.start_notify(NOTIFY_CHAR_UUID, self._on_notification)
-        for uuid in EXTRA_NOTIFY_UUIDS:
-            try:
-                await client.start_notify(uuid, self._on_notification)
-            except (BleakError, ValueError, KeyError) as err:
-                _LOGGER.debug("%s: no notifications on %s (%s)", self._name, uuid, err)
-
         await self._async_handshake(client)
         _LOGGER.debug("%s: handshake complete, waiting for telemetry", self._name)
 
@@ -235,15 +229,15 @@ class TempraBleDevice:
         the writes the same way, and without ``APP+DAT`` the notify channel
         stays silent.
         """
-        for command in (
-            f"APP+AEN={self._auth_token}",
-            "APP+NET",
-            "APP+DAT",
-            "APP+RDN=1",
-        ):
+        last = len(HANDSHAKE_COMMANDS) - 1
+        for index, template in enumerate(HANDSHAKE_COMMANDS):
+            command = template.format(token=self._auth_token)
             _LOGGER.debug("%s: -> %s", self._name, command)
             await client.write_gatt_char(WRITE_CHAR_UUID, command.encode("ascii"))
-            await asyncio.sleep(HANDSHAKE_DELAY)
+            if index != last:
+                # No trailing delay: the battery drops an idle session quickly,
+                # so the stream should get every second it can.
+                await asyncio.sleep(HANDSHAKE_DELAY)
 
     async def _async_disconnect(self) -> None:
         client, self._client = self._client, None
