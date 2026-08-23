@@ -11,7 +11,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import re
 import time
 from collections.abc import Callable
 
@@ -27,6 +26,7 @@ from .const import (
     UNDECODED_COMMANDS,
     WRITE_CHAR_UUID,
 )
+from .identity import serial_from_name
 from .models import TempraState
 from .parser import FrameStream, decode_frame
 
@@ -40,18 +40,6 @@ _BACKOFF_MAX = 120.0
 #: for this long. The stream is continuous once ``APP+DAT`` is accepted, so a
 #: gap this large means the link is up but useless.
 STALE_TIMEOUT = 90.0
-
-#: ``KAA_502048_TLB150`` -> ``502048``
-_SERIAL_RE = re.compile(r"^KAA_(?P<serial>[^_]+)_TLB150$", re.IGNORECASE)
-
-
-def serial_from_name(name: str | None) -> str | None:
-    """Extract the serial number from an advertised local name."""
-    if not name:
-        return None
-    match = _SERIAL_RE.match(name.strip())
-    return match.group("serial") if match else None
-
 
 class TempraBleDevice:
     """Maintains a live telemetry stream from one battery."""

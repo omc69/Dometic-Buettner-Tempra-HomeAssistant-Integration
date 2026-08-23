@@ -3,18 +3,45 @@
     "flow_title": "{name}",
     "step": {
       "user": {
-        "description": "Wähle die hinzuzufügende Tempra-Batterie.",
+        "title": "Tempra-Batterie hinzufügen",
+        "menu_options": {
+          "pick": "Batterie in Reichweite auswählen",
+          "manual": "Bluetooth-Adresse eingeben"
+        }
+      },
+      "pick": {
+        "description": "Diese Tempra-Batterien senden gerade.",
         "data": {
           "address": "Batterie"
         }
       },
+      "manual": {
+        "description": "Bluetooth-Adresse der Batterie eingeben, zum Beispiel AA:BB:CC:DD:EE:FF. Nutze das, wenn die Batterie gerade nicht sendet — etwa weil die Dometic-App verbunden ist und damit den einzigen Verbindungsslot belegt.",
+        "data": {
+          "address": "Bluetooth-Adresse",
+          "name": "Name (optional)"
+        },
+        "data_description": {
+          "name": "Leer lassen, um den gesendeten Namen der Batterie zu verwenden, etwa KAA_502048_TLB150."
+        }
+      },
       "confirm": {
         "description": "Möchtest du {name} einrichten?"
+      },
+      "reconfigure": {
+        "description": "Bluetooth-Adresse von {name} ändern. Entitäten und Verlauf bleiben erhalten — nutze das nach einem Batterietausch oder um einen Tippfehler zu korrigieren.",
+        "data": {
+          "address": "Bluetooth-Adresse"
+        }
       }
+    },
+    "error": {
+      "invalid_address": "Keine gültige Bluetooth-Adresse. Erwartet werden sechs Hex-Paare, zum Beispiel AA:BB:CC:DD:EE:FF.",
+      "already_configured": "Eine andere Batterie ist bereits mit dieser Adresse eingerichtet"
     },
     "abort": {
       "already_configured": "Diese Batterie ist bereits eingerichtet",
-      "no_devices_found": "Keine Tempra-Batterie in Reichweite gefunden. Prüfe, ob die Batterie eingeschaltet ist und die Dometic-App nicht verbunden ist — die Batterie erlaubt nur eine Bluetooth-Verbindung gleichzeitig."
+      "reconfigure_successful": "Adresse aktualisiert"
     }
   },
   "options": {

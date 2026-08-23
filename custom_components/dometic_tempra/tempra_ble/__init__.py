@@ -19,6 +19,7 @@ from .const import (
     UNDECODED_COMMANDS,
     WRITE_CHAR_UUID,
 )
+from .identity import normalize_address, serial_from_name
 from .models import MEASUREMENT_KEYS, TempraState
 from .parser import Frame, FrameStream, decode_frame
 
@@ -34,4 +35,6 @@ __all__ = [
     "FrameStream",
     "TempraState",
     "decode_frame",
+    "normalize_address",
+    "serial_from_name",
 ]

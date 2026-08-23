@@ -3,18 +3,45 @@
     "flow_title": "{name}",
     "step": {
       "user": {
-        "description": "Choose the Tempra battery to add.",
+        "title": "Add a Tempra battery",
+        "menu_options": {
+          "pick": "Choose a battery that is in range",
+          "manual": "Enter a Bluetooth address"
+        }
+      },
+      "pick": {
+        "description": "These Tempra batteries are advertising right now.",
         "data": {
           "address": "Battery"
         }
       },
+      "manual": {
+        "description": "Enter the battery's Bluetooth address, for example AA:BB:CC:DD:EE:FF. Use this when the battery is not advertising right now — for example because the Dometic app is connected to it, which occupies its only connection slot.",
+        "data": {
+          "address": "Bluetooth address",
+          "name": "Name (optional)"
+        },
+        "data_description": {
+          "name": "Leave empty to use the battery's advertised name, such as KAA_502048_TLB150."
+        }
+      },
       "confirm": {
         "description": "Do you want to set up {name}?"
+      },
+      "reconfigure": {
+        "description": "Change the Bluetooth address of {name}. Entities and history are kept — use this after replacing a battery or correcting a typo.",
+        "data": {
+          "address": "Bluetooth address"
+        }
       }
+    },
+    "error": {
+      "invalid_address": "Not a valid Bluetooth address. Expected six hex pairs, for example AA:BB:CC:DD:EE:FF.",
+      "already_configured": "Another battery is already configured with this address"
     },
     "abort": {
       "already_configured": "This battery is already configured",
-      "no_devices_found": "No Tempra battery found in range. Make sure the battery is powered and the Dometic app is not connected — the battery allows only one Bluetooth connection at a time."
+      "reconfigure_successful": "Address updated"
     }
   },
   "options": {

@@ -41,8 +41,27 @@ as category *Integration* → install → restart Home Assistant.
 Or copy `custom_components/dometic_tempra/` into your `config/custom_components/`
 and restart.
 
-Batteries advertise as `KAA_<serial>_TLB150` and are discovered automatically —
-**Settings → Devices & Services** will offer them. Add each battery separately.
+## Adding batteries
+
+Each battery is its own config entry, so a bank of two, three, or more is just
+that many entries — nothing in the integration assumes a count.
+
+Batteries advertise as `KAA_<serial>_TLB150` and are discovered automatically;
+**Settings → Devices & Services** offers them as they appear. **Add integration
+→ Dometic Büttner Tempra** then gives you two ways in:
+
+- **Choose a battery that is in range** — pick from everything advertising right
+  now, shown as `KAA_502048_TLB150 (10:23:81:8B:13:AD)`.
+- **Enter a Bluetooth address** — type `AA:BB:CC:DD:EE:FF` directly, with an
+  optional name. Use this for a battery that is not advertising at that moment,
+  which happens whenever the Dometic app is connected to it: the app occupies
+  the battery's only connection slot, so it disappears from discovery until you
+  close the app. Colons, dashes, spaces, or no separator at all are all
+  accepted.
+
+Swapped a battery, or typed the address wrong? **Device → ⋮ → Reconfigure**
+re-points an existing entry at a different address and keeps its entities,
+history, and every dashboard reference.
 
 ## The one-connection rule
 
@@ -59,6 +78,13 @@ consequences:
 Losing the connection is expected and handled: the integration reconnects with
 backoff, re-runs the handshake, and marks entities unavailable while the stream
 is down or has stalled for more than 90 seconds.
+
+Note that the limit is one connection *per battery*, not one overall — a bank of
+three batteries means three simultaneous connections held open on the same
+adapter. A Raspberry Pi's onboard radio manages that, but it is close to what it
+comfortably does alongside other BLE devices. If connections start flapping with
+a larger bank, an ESPHome Bluetooth proxy near the batteries takes the load off
+the host adapter and usually settles it.
 
 ## Troubleshooting
 
