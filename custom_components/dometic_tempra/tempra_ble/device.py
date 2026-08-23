@@ -81,6 +81,7 @@ class TempraBleDevice:
 
         self._reply = asyncio.Event()
         self._complete = asyncio.Event()
+        self._dropped = asyncio.Event()
         self._wake = asyncio.Event()
         self._last_success: float | None = None
 
@@ -187,6 +188,7 @@ class TempraBleDevice:
         self._streams.clear()
         self._reply.clear()
         self._complete.clear()
+        self._dropped.clear()
 
         _LOGGER.debug("%s: connecting to %s", self._name, self.address)
         client = await establish_connection(
@@ -209,7 +211,16 @@ class TempraBleDevice:
         await self._async_handshake(client)
 
         try:
-            await asyncio.wait_for(self._complete.wait(), timeout=SNAPSHOT_TIMEOUT)
+            await asyncio.wait_for(
+                asyncio.wait(
+                    [
+                        asyncio.ensure_future(self._complete.wait()),
+                        asyncio.ensure_future(self._dropped.wait()),
+                    ],
+                    return_when=asyncio.FIRST_COMPLETED,
+                ),
+                timeout=SNAPSHOT_TIMEOUT,
+            )
         except TimeoutError:
             missing = [
                 key for key in MEASUREMENT_KEYS if getattr(self.state, key) is None
@@ -252,6 +263,12 @@ class TempraBleDevice:
     async def _async_handshake(self, client: BleakClientWithServiceCache) -> None:
         """Run the command sequence that starts the telemetry stream."""
         for template in HANDSHAKE_COMMANDS:
+            if self._dropped.is_set():
+                # Writing into a link the battery has already closed only
+                # produces a confusing "Service Discovery has not been
+                # performed yet" and holds the radio away from the next
+                # battery for no reason.
+                raise BleakError("battery closed the connection mid-handshake")
             command = template.format(token=self._auth_token) + HANDSHAKE_TERMINATOR
             _LOGGER.debug("%s: -> %r", self._name, command)
             self._reply.clear()
@@ -276,6 +293,7 @@ class TempraBleDevice:
 
     def _on_disconnected(self, _client: BleakClientWithServiceCache) -> None:
         _LOGGER.debug("%s: disconnected", self._name)
+        self._dropped.set()
 
     def _on_notification(
         self, sender: BleakGATTCharacteristic, data: bytearray

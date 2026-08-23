@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .const import (
+    CELL_COUNT,
     CMD_CAPACITY,
     CMD_CELLS_1_2,
     CMD_CELLS_3_4,
@@ -134,3 +135,7 @@ def decode_frame(frame: Frame) -> dict[str, Any] | None:
 
     return None
 
+
+def cell_keys() -> tuple[str, ...]:
+    """Measurement keys of the individual cell voltages."""
+    return tuple(f"cell_{index}_mv" for index in range(1, CELL_COUNT + 1))

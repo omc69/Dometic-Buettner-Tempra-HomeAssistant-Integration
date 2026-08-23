@@ -9,6 +9,18 @@
       },
       "cell_voltage": {
         "default": "mdi:battery-outline"
+      },
+      "bank_remaining_ah": {
+        "default": "mdi:battery-70"
+      },
+      "bank_capacity_ah": {
+        "default": "mdi:battery-charging-100"
+      },
+      "bank_cell_delta": {
+        "default": "mdi:arrow-expand-vertical"
+      },
+      "bank_online": {
+        "default": "mdi:counter"
       }
     }
   }

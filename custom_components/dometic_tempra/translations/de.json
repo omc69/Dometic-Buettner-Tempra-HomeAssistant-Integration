@@ -73,6 +73,27 @@
       },
       "cell_voltage": {
         "name": "Zellspannung {cell}"
+      },
+      "bank_voltage": {
+        "name": "Bankspannung"
+      },
+      "bank_current": {
+        "name": "Bankstrom"
+      },
+      "bank_power": {
+        "name": "Bankleistung"
+      },
+      "bank_remaining_ah": {
+        "name": "Restkapazität"
+      },
+      "bank_capacity_ah": {
+        "name": "Bankkapazität"
+      },
+      "bank_cell_delta": {
+        "name": "Zellspreizung"
+      },
+      "bank_online": {
+        "name": "Meldende Batterien"
       }
     }
   }

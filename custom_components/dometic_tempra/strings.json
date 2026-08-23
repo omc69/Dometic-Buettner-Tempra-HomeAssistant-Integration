@@ -73,6 +73,27 @@
       },
       "cell_voltage": {
         "name": "Cell {cell} voltage"
+      },
+      "bank_voltage": {
+        "name": "Bank voltage"
+      },
+      "bank_current": {
+        "name": "Bank current"
+      },
+      "bank_power": {
+        "name": "Bank power"
+      },
+      "bank_remaining_ah": {
+        "name": "Remaining capacity"
+      },
+      "bank_capacity_ah": {
+        "name": "Bank capacity"
+      },
+      "bank_cell_delta": {
+        "name": "Cell spread"
+      },
+      "bank_online": {
+        "name": "Batteries reporting"
       }
     }
   }

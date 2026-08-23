@@ -22,8 +22,35 @@ The BLE protocol was reverse engineered from HCI traces; the full write-up is in
 | Rated capacity | Ah | diagnostic, 150 Ah on a TLB150 |
 | Cell 1–4 voltage | mV | diagnostic, useful for spotting drift in the 4S pack |
 
-Values are **pushed**, not polled: after the handshake the battery streams
-continuously, so entities update as fast as the battery sends.
+### Battery bank
+
+With more than one battery configured, a **Tempra battery bank** device
+aggregates them:
+
+| Sensor | Unit | Notes |
+|---|---|---|
+| Bank voltage | V | mean — batteries in parallel share one voltage |
+| Bank current | A | sum |
+| Bank power | W | sum |
+| Battery | % | state of charge, **weighted by capacity** — an even mean misreports a bank of mixed sizes |
+| Remaining capacity | Ah | sum of each battery's share |
+| Bank capacity | Ah | diagnostic, sum of the rated capacities |
+| Cell spread | mV | diagnostic, widest gap between any two cells in the bank — the number worth watching on LiFePO₄ |
+| Batteries reporting | | diagnostic, how many of the configured batteries answered |
+
+Aggregates cover the batteries currently reporting, so one battery missing a
+turn skews nothing silently — "Batteries reporting" says how many went in.
+
+### Polling
+
+Batteries take turns on the Bluetooth adapter: one connects, runs the
+handshake, collects a reading, disconnects, and hands the radio on. A reading
+per battery per minute, which is ample for a battery bank.
+
+That is deliberate. Holding a connection open to every battery at once is
+unreliable on a Raspberry Pi's onboard radio at the signal levels a bank in a
+vehicle actually produces — whichever battery came third would fail, and which
+one rotated between runs. Taking turns removes the contention.
 
 ## Requirements
 
