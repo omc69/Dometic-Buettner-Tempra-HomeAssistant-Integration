@@ -20,6 +20,15 @@ WRITE_CHAR_UUID: Final = "00000001-0000-1000-8000-008025000000"
 #: Notify characteristic, carries ASCII replies *and* binary telemetry.
 NOTIFY_CHAR_UUID: Final = "00000002-0000-1000-8000-008025000000"
 
+#: The Dometic app also subscribes to these two in every capture; their purpose
+#: is undocumented. Subscribing is passive, mirrors what the app does, and means
+#: telemetry arriving on the "wrong" characteristic is still seen instead of
+#: silently missed. Failures to subscribe are ignored.
+EXTRA_NOTIFY_UUIDS: Final = (
+    "0000000a-0000-1000-8000-008025000000",
+    "00000004-0000-1000-8000-008025000000",
+)
+
 # --- Advertising -----------------------------------------------------------
 
 #: Advertised local name, ``KAA_<serial>_TLB150``.

@@ -21,6 +21,7 @@ from bleak_retry_connector import BleakClientWithServiceCache, establish_connect
 
 from .const import (
     DEFAULT_AUTH_TOKEN,
+    EXTRA_NOTIFY_UUIDS,
     HANDSHAKE_DELAY,
     NOTIFY_CHAR_UUID,
     UNDECODED_COMMANDS,
@@ -57,7 +58,7 @@ class TempraBleDevice:
         self._listeners: list[Callable[[TempraState], None]] = []
 
         self._client: BleakClientWithServiceCache | None = None
-        self._stream = FrameStream()
+        self._streams: dict[str, FrameStream] = {}
         self._task: asyncio.Task[None] | None = None
         self._stopping = False
         self._link_lost = asyncio.Event()
@@ -181,7 +182,7 @@ class TempraBleDevice:
 
     async def _async_connect_and_stream(self) -> None:
         self._link_lost.clear()
-        self._stream.reset()
+        self._streams.clear()
         self._last_frame = None
 
         _LOGGER.debug("%s: connecting to %s", self._name, self.address)
@@ -194,10 +195,17 @@ class TempraBleDevice:
             use_services_cache=True,
         )
         self._client = client
+        self._log_gatt_table(client)
 
         await client.start_notify(NOTIFY_CHAR_UUID, self._on_notification)
+        for uuid in EXTRA_NOTIFY_UUIDS:
+            try:
+                await client.start_notify(uuid, self._on_notification)
+            except (BleakError, ValueError, KeyError) as err:
+                _LOGGER.debug("%s: no notifications on %s (%s)", self._name, uuid, err)
+
         await self._async_handshake(client)
-        _LOGGER.debug("%s: handshake complete, streaming", self._name)
+        _LOGGER.debug("%s: handshake complete, waiting for telemetry", self._name)
 
         # Hold the connection open until it drops or the stream goes stale.
         while not self._stopping:
@@ -233,6 +241,7 @@ class TempraBleDevice:
             "APP+DAT",
             "APP+RDN=1",
         ):
+            _LOGGER.debug("%s: -> %s", self._name, command)
             await client.write_gatt_char(WRITE_CHAR_UUID, command.encode("ascii"))
             await asyncio.sleep(HANDSHAKE_DELAY)
 
@@ -249,12 +258,34 @@ class TempraBleDevice:
         _LOGGER.debug("%s: disconnected", self._name)
         self._link_lost.set()
 
+    def _log_gatt_table(self, client: BleakClientWithServiceCache) -> None:
+        """Dump the discovered GATT table, so a firmware that moved a
+        characteristic can be spotted from a user's debug log."""
+        if not _LOGGER.isEnabledFor(logging.DEBUG):
+            return
+        for service in client.services:
+            _LOGGER.debug("%s: service %s", self._name, service.uuid)
+            for char in service.characteristics:
+                _LOGGER.debug(
+                    "%s:   char %s handle=0x%04X props=%s",
+                    self._name,
+                    char.uuid,
+                    char.handle,
+                    ",".join(char.properties),
+                )
+
     def _on_notification(
-        self, _sender: BleakGATTCharacteristic, data: bytearray
+        self, sender: BleakGATTCharacteristic, data: bytearray
     ) -> None:
+        raw = bytes(data)
+        _LOGGER.debug(
+            "%s: <- %s %s %r", self._name, sender.uuid, raw.hex(" "), raw
+        )
+
         changed: dict[str, object] = {}
         undecoded: dict[int, str] | None = None
-        frames = self._stream.feed(bytes(data))
+        stream = self._streams.setdefault(sender.uuid, FrameStream())
+        frames = stream.feed(raw)
 
         for frame in frames:
             values = decode_frame(frame)
