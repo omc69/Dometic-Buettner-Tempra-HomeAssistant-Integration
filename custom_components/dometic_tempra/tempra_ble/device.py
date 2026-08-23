@@ -21,14 +21,16 @@ from bleak_retry_connector import BleakClientWithServiceCache, establish_connect
 
 from .const import (
     DEFAULT_AUTH_TOKEN,
-    EXTRA_NOTIFY_UUIDS,
+    COMMAND_REPLY_TIMEOUT,
     HANDSHAKE_COMMANDS,
     HANDSHAKE_DELAY,
     HANDSHAKE_REPLY_TIMEOUT,
     HANDSHAKE_TERMINATOR,
+    INDICATE_CHAR_UUID,
     NOTIFY_CHAR_UUID,
     SESSION_CHAR_UUID,
     SESSION_OPEN_VALUE,
+    SESSION_SETTLE_DELAY,
     UNDECODED_COMMANDS,
     WRITE_CHAR_UUID,
 )
@@ -70,6 +72,7 @@ class TempraBleDevice:
         self._wake = asyncio.Event()
         self._last_frame: float | None = None
         self._any_notification = asyncio.Event()
+        self._reply = asyncio.Event()
         self._attempt = 0
 
         self.state = TempraState(
@@ -206,16 +209,13 @@ class TempraBleDevice:
         self._log_gatt_table(client)
 
         self._any_notification.clear()
+        # Order matters and is taken byte-for-byte from the iOS captures:
+        # notifications, then indications -- which is what actually unlocks the
+        # session -- then the C8 write, then the commands.
         await client.start_notify(NOTIFY_CHAR_UUID, self._on_notification)
+        await client.start_notify(INDICATE_CHAR_UUID, self._on_notification)
         await self._async_open_session(client)
-        for uuid in EXTRA_NOTIFY_UUIDS:
-            try:
-                await client.start_notify(uuid, self._on_notification)
-            except (BleakError, ValueError, KeyError) as err:
-                _LOGGER.debug("%s: cannot listen on %s (%s)", self._name, uuid, err)
-            else:
-                _LOGGER.debug("%s: listening on %s", self._name, uuid)
-
+        await asyncio.sleep(SESSION_SETTLE_DELAY)
         await self._async_handshake(client)
 
         # The write characteristic is write-without-response, so a command the
@@ -282,14 +282,20 @@ class TempraBleDevice:
         the writes the same way, and without ``APP+DAT`` the notify channel
         stays silent.
         """
-        last = len(HANDSHAKE_COMMANDS) - 1
-        for index, template in enumerate(HANDSHAKE_COMMANDS):
+        for template in HANDSHAKE_COMMANDS:
             command = template.format(token=self._auth_token) + HANDSHAKE_TERMINATOR
             _LOGGER.debug("%s: -> %r", self._name, command)
+            self._reply.clear()
             await client.write_gatt_char(WRITE_CHAR_UUID, command.encode("ascii"))
-            if index != last:
-                # No trailing delay: the battery drops an idle session quickly,
-                # so the stream should get every millisecond it can.
+            # The app sends the next command as soon as the previous one is
+            # answered, so follow the battery's pace rather than a fixed timer.
+            # A command that draws no reply must not stall the rest.
+            try:
+                await asyncio.wait_for(
+                    self._reply.wait(), timeout=COMMAND_REPLY_TIMEOUT
+                )
+            except TimeoutError:
+                _LOGGER.debug("%s: no reply to %r", self._name, command)
                 await asyncio.sleep(HANDSHAKE_DELAY)
 
     async def _async_disconnect(self) -> None:
@@ -329,6 +335,7 @@ class TempraBleDevice:
             "%s: <- %s %s %r", self._name, sender.uuid, raw.hex(" "), raw
         )
         self._any_notification.set()
+        self._reply.set()
 
         changed: dict[str, object] = {}
         undecoded: dict[int, str] | None = None

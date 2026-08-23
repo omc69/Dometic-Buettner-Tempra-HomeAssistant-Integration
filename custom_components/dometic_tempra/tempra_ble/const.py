@@ -27,16 +27,11 @@ NOTIFY_CHAR_UUID: Final = "00000002-0000-1000-8000-008025000000"
 SESSION_CHAR_UUID: Final = "00000003-0000-1000-8000-008025000000"
 SESSION_OPEN_VALUE: Final = b"\xc8"
 
-#: Indicate characteristics the Dometic app also subscribes to. 0x000A is the
-#: only channel that has ever delivered anything (a 9b 00 indication), so it is
-#: worth listening to. An earlier release blamed this subscription for the
-#: battery hanging up ~1.2 s after connecting; that was wrong -- the same
-#: 1.2 s drop happened with no subscription at all, and the real cause was the
-#: missing C8 session write. Failures to subscribe are ignored.
-EXTRA_NOTIFY_UUIDS: Final = (
-    "0000000a-0000-1000-8000-008025000000",
-    "00000004-0000-1000-8000-008025000000",
-)
+#: Indicate characteristic. Subscribing here is what unlocks the session: the
+#: battery answers immediately with a single 8E indication, and only after that
+#: does it accept the C8 session write and the APP+ commands. Confirmed in the
+#: iOS captures. The app never touches 0x000A, so neither do we.
+INDICATE_CHAR_UUID: Final = "00000004-0000-1000-8000-008025000000"
 
 # --- Advertising -----------------------------------------------------------
 
@@ -50,25 +45,33 @@ LOCAL_NAME_PATTERN: Final = "KAA_*_TLB150"
 #: future capture shows a different value.
 DEFAULT_AUTH_TOKEN: Final = "f560f1deba"
 
-#: Gap between handshake writes. The handover suggested 0.3 s, but a real
-#: battery hangs up about 1.2 s after connecting, and five writes at 0.3 s do
-#: not fit in that window -- two of three batteries were dropped before the
-#: sequence finished. Keep the whole sequence comfortably under a second.
+#: Pause after the session write, before the first command. The app waits
+#: about 0.55 s here.
+SESSION_SETTLE_DELAY: Final = 0.4
+
+#: How long to wait for the battery's reply to each command before moving on.
+#: The app is reply-driven rather than timer-driven: it sends the next command
+#: as soon as the previous one is answered, roughly 0.3 s and 0.05 s apart in
+#: the captures.
+COMMAND_REPLY_TIMEOUT: Final = 2.0
+
+#: Fallback gap when a command draws no reply, so a silent step cannot stall
+#: the rest of the sequence.
 HANDSHAKE_DELAY: Final = 0.12
 
-#: Command terminator. All of "", CRLF, LF and CR were tried against all three
-#: batteries and every one was met with silence, so this is not where the
-#: problem is. Back to what the capture literally shows: no terminator.
+#: No terminator. Confirmed byte-for-byte from the captures: the app writes
+#: exactly "APP+AEN=f560f1deba" with no trailing CR or LF.
 HANDSHAKE_TERMINATOR: Final = ""
 
 #: How long to wait for the battery to say anything at all after a handshake
 #: before treating that attempt's variant as wrong.
 HANDSHAKE_REPLY_TIMEOUT: Final = 6.0
 
-#: The handshake in the order the Dometic app sends it. ``APP+IMP`` is step 4
-#: of the documented sequence; the handover pseudocode left it out, and the
-#: battery hangs up a few seconds after the shortened sequence without ever
-#: sending telemetry. ``{token}`` is substituted with the auth token.
+#: The handshake in the order the Dometic app sends it. Telemetry starts the
+#: moment ``APP+DAT`` is acknowledged; ``APP+IMP`` and ``APP+RDN=1`` follow in
+#: the captures but arrive after the stream is already running, so they are
+#: sent for fidelity rather than necessity. ``{token}`` is substituted with the
+#: auth token.
 HANDSHAKE_COMMANDS: Final = (
     "APP+AEN={token}",
     "APP+NET",
