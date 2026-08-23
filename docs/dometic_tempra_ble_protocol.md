@@ -112,3 +112,65 @@ Empfehlung: `bleak`-basiertes Python-Script analog zum bestehenden `caratec_batt
 1. Verbindung aufbaut und den Handshake aus Abschnitt 3 automatisch durchführt,
 2. Notify-Frames auf `00000002` parst und nach Cmd-ID dispatcht,
 3. Werte per MQTT mit HA-Auto-Discovery published.
+
+---
+
+## 7. Corrections from live hardware (2026-08-23)
+
+Observed by the Home Assistant integration against `KAA_502269_TLB150`
+(`48:02:AF:99:A4:93`) on Home Assistant 2026.8.2 / BlueZ, Raspberry Pi 5
+onboard adapter. These supersede the corresponding entries above.
+
+### 7.1 Devices in the field
+
+A third battery exists that is not listed in section 1:
+
+| Name | Address |
+|---|---|
+| `KAA_502048_TLB150` | `00:21:7E:72:EE:12` |
+| `KAA_502269_TLB150` | `48:02:AF:99:A4:93` |
+| `KAA_502039_TLB150` | `48:02:AF:99:A4:9B` |
+
+Note the two address ranges: `502269` and `502039` share an OUI, `502048`
+does not — so the fleet spans at least two hardware or module revisions.
+
+### 7.2 Actual GATT table
+
+Handles differ from the iOS trace by one to two, and the properties are more
+specific than section 2 records. Everything is addressed by UUID, so the
+handle drift is harmless, but the **properties** matter.
+
+| Char | Handle (actual) | Handle (doc) | Properties |
+|---|---|---|---|
+| `00000009` | 0x0012 | — | write |
+| `0000000A` | 0x0014 | 0x0016 | **indicate** |
+| `00000001` | 0x0017 | 0x0018 | **write-without-response** |
+| `00000002` | 0x0019 | 0x001A | notify |
+| `00000003` | 0x001C | 0x001D | write |
+| `00000004` | 0x001E | 0x001F | indicate |
+
+Services present: `1800`, `1801`, `180A` (only PnP ID `2A50`), and `FEFB`.
+
+### 7.3 Do not subscribe to 0x000A
+
+Enabling indications on `0000000A` yields a single `9b 00` and the battery
+then **drops the connection about 1.2 seconds later**, before any handshake
+write can go out. Reproduced on consecutive connection attempts. Subscribing
+to `00000004` fails outright with GATT protocol error 0x0E (Unlikely Error).
+
+Only `00000002` may be subscribed.
+
+### 7.4 Open: the battery hangs up without streaming
+
+With the four-step handshake from the handover (`AEN`, `NET`, `DAT`, `RDN=1`)
+the writes all succeed and the battery then disconnects after a few seconds
+without sending a single frame — no binary telemetry and no `MST+` ASCII
+reply. Candidate causes, in the order they are being tested:
+
+1. The handshake is incomplete: `APP+IMP` (section 3, step 4) is missing from
+   the handover pseudocode.
+2. The `APP+AEN` token is per-device rather than app-constant. All captures
+   in section 3 appear to come from a single battery, so a token derived from
+   the MAC or serial would have looked constant.
+3. The ASCII commands need a line terminator. `0x14` returning ASCII `NNN\n`
+   shows the protocol does use `\n` somewhere.
