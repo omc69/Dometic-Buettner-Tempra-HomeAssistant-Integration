@@ -81,18 +81,22 @@ POLL_INTERVAL: Final = 60.0
 #: single missed turn does not blank the dashboard.
 DATA_STALE_AFTER: Final = 300.0
 
-#: The handshake in the order the Dometic app sends it. Telemetry starts the
-#: moment ``APP+DAT`` is acknowledged; ``APP+IMP`` and ``APP+RDN=1`` follow in
-#: the captures but arrive after the stream is already running, so they are
-#: sent for fidelity rather than necessity. ``{token}`` is substituted with the
-#: auth token.
+#: The handshake, trimmed to what actually starts the stream. ``{token}`` is
+#: substituted with the auth token.
+#:
+#: The app also sends ``APP+IMP`` and ``APP+RDN=1``, but the captures show
+#: telemetry already flowing before either goes out, and ``APP+IMP`` draws
+#: sixteen sequential ``MST+IMP=`` replies. On a marginal link that burns the
+#: seconds a snapshot needs, so neither is sent.
 HANDSHAKE_COMMANDS: Final = (
     "APP+AEN={token}",
     "APP+NET",
     "APP+DAT",
-    "APP+IMP",
-    "APP+RDN=1",
 )
+
+#: Attempts for the session write. A link at -80 dBm sometimes rejects the
+#: first one with GATT Unlikely Error and accepts the next.
+SESSION_WRITE_ATTEMPTS: Final = 3
 
 # --- Binary framing --------------------------------------------------------
 

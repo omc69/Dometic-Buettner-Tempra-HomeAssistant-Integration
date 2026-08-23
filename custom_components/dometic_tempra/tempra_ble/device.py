@@ -41,6 +41,7 @@ from .const import (
     SESSION_CHAR_UUID,
     SESSION_OPEN_VALUE,
     SESSION_SETTLE_DELAY,
+    SESSION_WRITE_ATTEMPTS,
     SNAPSHOT_TIMEOUT,
     UNDECODED_COMMANDS,
     WRITE_CHAR_UUID,
@@ -203,9 +204,7 @@ class TempraBleDevice:
         # then the C8 write, then the commands.
         await client.start_notify(NOTIFY_CHAR_UUID, self._on_notification)
         await client.start_notify(INDICATE_CHAR_UUID, self._on_notification)
-        await client.write_gatt_char(
-            SESSION_CHAR_UUID, SESSION_OPEN_VALUE, response=True
-        )
+        await self._async_open_session(client)
         await asyncio.sleep(SESSION_SETTLE_DELAY)
         await self._async_handshake(client)
 
@@ -226,13 +225,32 @@ class TempraBleDevice:
         self._last_success = time.monotonic()
         return True
 
-    async def _async_handshake(self, client: BleakClientWithServiceCache) -> None:
-        """Run the command sequence that starts the telemetry stream.
+    async def _async_open_session(self, client: BleakClientWithServiceCache) -> None:
+        """Write the C8 byte that unlocks the command channel.
 
-        Telemetry begins the moment ``APP+DAT`` is acknowledged; ``APP+IMP``
-        and ``APP+RDN=1`` follow in the captures but arrive after the stream is
-        already running.
+        A link at -80 dBm sometimes rejects this with GATT Unlikely Error and
+        accepts it moments later, so retry rather than throwing away the whole
+        poll on one flaky ATT transaction.
         """
+        for attempt in range(1, SESSION_WRITE_ATTEMPTS + 1):
+            try:
+                await client.write_gatt_char(
+                    SESSION_CHAR_UUID, SESSION_OPEN_VALUE, response=True
+                )
+            except BleakError:
+                if attempt == SESSION_WRITE_ATTEMPTS:
+                    raise
+                _LOGGER.debug(
+                    "%s: session write attempt %d rejected, retrying",
+                    self._name,
+                    attempt,
+                )
+                await asyncio.sleep(0.2)
+            else:
+                return
+
+    async def _async_handshake(self, client: BleakClientWithServiceCache) -> None:
+        """Run the command sequence that starts the telemetry stream."""
         for template in HANDSHAKE_COMMANDS:
             command = template.format(token=self._auth_token) + HANDSHAKE_TERMINATOR
             _LOGGER.debug("%s: -> %r", self._name, command)
