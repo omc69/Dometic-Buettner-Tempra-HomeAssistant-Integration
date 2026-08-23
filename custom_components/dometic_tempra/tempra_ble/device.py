@@ -21,10 +21,11 @@ from bleak_retry_connector import BleakClientWithServiceCache, establish_connect
 
 from .const import (
     DEFAULT_AUTH_TOKEN,
+    EXTRA_NOTIFY_UUIDS,
     HANDSHAKE_COMMANDS,
     HANDSHAKE_DELAY,
     HANDSHAKE_REPLY_TIMEOUT,
-    HANDSHAKE_TERMINATORS,
+    HANDSHAKE_TERMINATOR,
     NOTIFY_CHAR_UUID,
     SESSION_CHAR_UUID,
     SESSION_OPEN_VALUE,
@@ -70,10 +71,6 @@ class TempraBleDevice:
         self._last_frame: float | None = None
         self._any_notification = asyncio.Event()
         self._attempt = 0
-        #: Index into HANDSHAKE_TERMINATORS. Latched once the battery replies,
-        #: so a working variant is not cycled away from on the next reconnect.
-        self._terminator_index = 0
-        self._terminator_locked = False
 
         self.state = TempraState(
             address=ble_device.address,
@@ -211,7 +208,15 @@ class TempraBleDevice:
         self._any_notification.clear()
         await client.start_notify(NOTIFY_CHAR_UUID, self._on_notification)
         await self._async_open_session(client)
-        terminator = await self._async_handshake(client)
+        for uuid in EXTRA_NOTIFY_UUIDS:
+            try:
+                await client.start_notify(uuid, self._on_notification)
+            except (BleakError, ValueError, KeyError) as err:
+                _LOGGER.debug("%s: cannot listen on %s (%s)", self._name, uuid, err)
+            else:
+                _LOGGER.debug("%s: listening on %s", self._name, uuid)
+
+        await self._async_handshake(client)
 
         # The write characteristic is write-without-response, so a command the
         # battery rejects is discarded silently. The only evidence a handshake
@@ -223,18 +228,12 @@ class TempraBleDevice:
             )
         except TimeoutError:
             _LOGGER.warning(
-                "%s: silent after handshake with terminator %r; trying the next "
-                "variant on the next attempt",
+                "%s: connected and session opened, but the battery answered "
+                "nothing on any channel within %.0fs",
                 self._name,
-                terminator,
+                HANDSHAKE_REPLY_TIMEOUT,
             )
             return
-
-        if not self._terminator_locked:
-            self._terminator_locked = True
-            _LOGGER.info(
-                "%s: battery answered with terminator %r", self._name, terminator
-            )
 
         # Hold the connection open until it drops or the stream goes stale.
         while not self._stopping:
@@ -276,27 +275,22 @@ class TempraBleDevice:
         else:
             _LOGGER.debug("%s: session open write acknowledged", self._name)
 
-    async def _async_handshake(self, client: BleakClientWithServiceCache) -> str:
+    async def _async_handshake(self, client: BleakClientWithServiceCache) -> None:
         """Run the mandatory command sequence that unlocks the data stream.
 
         Order matters and the delays are deliberate -- the Dometic app spaces
         the writes the same way, and without ``APP+DAT`` the notify channel
         stays silent.
         """
-        if not self._terminator_locked:
-            self._terminator_index = self._attempt % len(HANDSHAKE_TERMINATORS)
-        terminator = HANDSHAKE_TERMINATORS[self._terminator_index]
-
         last = len(HANDSHAKE_COMMANDS) - 1
         for index, template in enumerate(HANDSHAKE_COMMANDS):
-            command = template.format(token=self._auth_token) + terminator
+            command = template.format(token=self._auth_token) + HANDSHAKE_TERMINATOR
             _LOGGER.debug("%s: -> %r", self._name, command)
             await client.write_gatt_char(WRITE_CHAR_UUID, command.encode("ascii"))
             if index != last:
                 # No trailing delay: the battery drops an idle session quickly,
                 # so the stream should get every millisecond it can.
                 await asyncio.sleep(HANDSHAKE_DELAY)
-        return terminator
 
     async def _async_disconnect(self) -> None:
         client, self._client = self._client, None

@@ -27,10 +27,16 @@ NOTIFY_CHAR_UUID: Final = "00000002-0000-1000-8000-008025000000"
 SESSION_CHAR_UUID: Final = "00000003-0000-1000-8000-008025000000"
 SESSION_OPEN_VALUE: Final = b"\xc8"
 
-#: Do NOT subscribe to 0x000A or 0x0004. Both are Indicate, not Notify, and
-#: enabling indications on 0x000A makes the battery hang up ~1.2 s later --
-#: reproduced on consecutive attempts against KAA_502269_TLB150, before the
-#: first handshake write even went out.
+#: Indicate characteristics the Dometic app also subscribes to. 0x000A is the
+#: only channel that has ever delivered anything (a 9b 00 indication), so it is
+#: worth listening to. An earlier release blamed this subscription for the
+#: battery hanging up ~1.2 s after connecting; that was wrong -- the same
+#: 1.2 s drop happened with no subscription at all, and the real cause was the
+#: missing C8 session write. Failures to subscribe are ignored.
+EXTRA_NOTIFY_UUIDS: Final = (
+    "0000000a-0000-1000-8000-008025000000",
+    "00000004-0000-1000-8000-008025000000",
+)
 
 # --- Advertising -----------------------------------------------------------
 
@@ -50,14 +56,10 @@ DEFAULT_AUTH_TOKEN: Final = "f560f1deba"
 #: sequence finished. Keep the whole sequence comfortably under a second.
 HANDSHAKE_DELAY: Final = 0.12
 
-#: Command terminators to try, one per connection attempt, until the battery
-#: answers. The captures show the payload without a terminator, but a
-#: PacketLogger trace does not necessarily render a trailing CR/LF -- and the
-#: 0x14 register returning ASCII "NNN\n" proves the protocol uses newlines
-#: somewhere. Since the write characteristic is write-without-response, a
-#: rejected command is silently discarded, so this cannot be told apart from a
-#: wrong terminator except by trying.
-HANDSHAKE_TERMINATORS: Final = ("", "\r\n", "\n", "\r")
+#: Command terminator. All of "", CRLF, LF and CR were tried against all three
+#: batteries and every one was met with silence, so this is not where the
+#: problem is. Back to what the capture literally shows: no terminator.
+HANDSHAKE_TERMINATOR: Final = ""
 
 #: How long to wait for the battery to say anything at all after a handshake
 #: before treating that attempt's variant as wrong.

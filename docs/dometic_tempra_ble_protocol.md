@@ -151,26 +151,57 @@ handle drift is harmless, but the **properties** matter.
 
 Services present: `1800`, `1801`, `180A` (only PnP ID `2A50`), and `FEFB`.
 
-### 7.3 Do not subscribe to 0x000A
+### 7.3 The C8 write to 0x0003 is mandatory
 
-Enabling indications on `0000000A` yields a single `9b 00` and the battery
-then **drops the connection about 1.2 seconds later**, before any handshake
-write can go out. Reproduced on consecutive connection attempts. Subscribing
-to `00000004` fails outright with GATT protocol error 0x0E (Unlikely Error).
+Section 2 records that the app writes `C8` to `00000003` but calls the purpose
+unclear. It is what keeps the session alive.
 
-Only `00000002` may be subscribed.
+Without it the battery **drops the connection about 1.2 seconds after
+connecting**, reproducibly, on all three batteries, regardless of what is
+written to the ASCII command channel. With it the connection stays up for at
+least 6.5 seconds and the write is acknowledged (`00000003` is
+write-with-response, so this is a real acknowledgement, not an assumption).
 
-### 7.4 Open: the battery hangs up without streaming
+Send it right after subscribing to `00000002`, before the `APP+` sequence.
 
-With the four-step handshake from the handover (`AEN`, `NET`, `DAT`, `RDN=1`)
-the writes all succeed and the battery then disconnects after a few seconds
-without sending a single frame — no binary telemetry and no `MST+` ASCII
-reply. Candidate causes, in the order they are being tested:
+> An earlier revision of this section claimed that subscribing to `0000000A`
+> caused the 1.2 s disconnect. That was wrong: the same drop occurs with no
+> subscription at all. The cause was the missing `C8` write.
 
-1. The handshake is incomplete: `APP+IMP` (section 3, step 4) is missing from
-   the handover pseudocode.
-2. The `APP+AEN` token is per-device rather than app-constant. All captures
-   in section 3 appear to come from a single battery, so a token derived from
-   the MAC or serial would have looked constant.
-3. The ASCII commands need a line terminator. `0x14` returning ASCII `NNN\n`
-   shows the protocol does use `\n` somewhere.
+### 7.4 Ruled out
+
+- **Pairing / an encrypted link.** The battery refuses it outright —
+  `org.bluez.Error.AuthenticationFailed` — and drops the connection in the
+  process. The link is meant to be unencrypted.
+- **A command terminator.** Each of `""`, `\r\n`, `\n` and `\r` was tried
+  against all three batteries. Every variant was met with silence.
+- **Handshake timing.** The five writes now complete in about 0.5 s, well
+  inside the window the battery holds a connection open.
+- **Wrong UUIDs.** The discovered GATT table matches section 2 (see 7.2).
+
+### 7.5 Open: the battery answers nothing
+
+State of play: the connection is stable, the `C8` session write is
+acknowledged, and `APP+AEN` / `NET` / `DAT` / `IMP` / `RDN=1` all go out — and
+the battery sends **nothing at all**, neither binary telemetry nor an `MST+`
+ASCII reply.
+
+Note that `00000001` is *write-without-response*, so a command the battery
+rejects is discarded silently. There is no evidence any `APP+` command has
+ever been understood.
+
+Remaining candidates:
+
+1. **The `APP+AEN` token is per-device.** Section 3 assumes it is app-constant
+   because every capture showed `f560f1deba` — but those captures appear to
+   come from a single battery, and a token derived from the MAC or serial
+   would look constant in that sample. The decisive test is a fresh capture
+   against a *different* battery, ideally `KAA_502048_TLB150`, which is on the
+   other hardware generation (see 7.1).
+2. **The ASCII commands go somewhere else.** `00000009` (handle 0x0012,
+   write-with-response) pairs naturally with `0000000A` (0x0014, indicate),
+   and `0000000A` is the only channel that has ever produced data — a `9b 00`
+   indication. The section 2 handle-to-UUID mapping came from an iOS trace
+   whose handles are off by one or two from what the device actually reports.
+3. **Something in the sequence is still missing**, in the same way the `C8`
+   write was missing.
