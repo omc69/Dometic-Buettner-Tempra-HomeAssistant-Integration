@@ -59,6 +59,10 @@ one rotated between runs. Taking turns removes the contention.
   adapter or an ESPHome Bluetooth proxy. Passive-only proxies (e.g. a Shelly BLU
   Gateway) can see the battery advertise but cannot connect to it.
 
+If the batteries read worse than about −70 dBm, expect failed polls and put a
+proxy near them: [docs/bluetooth-proxy.md](docs/bluetooth-proxy.md) explains
+why, which boards work, and the one ESPHome setting that is easy to miss.
+
 ## Installation
 
 **HACS** → ⋮ → *Custom repositories* → add
