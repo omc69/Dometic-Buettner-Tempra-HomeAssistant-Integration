@@ -23,6 +23,8 @@ from .const import (
     DEFAULT_AUTH_TOKEN,
     HANDSHAKE_COMMANDS,
     HANDSHAKE_DELAY,
+    HANDSHAKE_REPLY_TIMEOUT,
+    HANDSHAKE_TERMINATORS,
     NOTIFY_CHAR_UUID,
     UNDECODED_COMMANDS,
     WRITE_CHAR_UUID,
@@ -64,6 +66,12 @@ class TempraBleDevice:
         self._link_lost = asyncio.Event()
         self._wake = asyncio.Event()
         self._last_frame: float | None = None
+        self._any_notification = asyncio.Event()
+        self._attempt = 0
+        #: Index into HANDSHAKE_TERMINATORS. Latched once the battery replies,
+        #: so a working variant is not cycled away from on the next reconnect.
+        self._terminator_index = 0
+        self._terminator_locked = False
 
         self.state = TempraState(
             address=ble_device.address,
@@ -144,6 +152,7 @@ class TempraBleDevice:
     async def _supervise(self) -> None:
         backoff = _BACKOFF_START
         while not self._stopping:
+            self._attempt += 1
             try:
                 await self._async_connect_and_stream()
             except asyncio.CancelledError:
@@ -196,10 +205,34 @@ class TempraBleDevice:
         )
         self._client = client
         self._log_gatt_table(client)
+        await self._async_pair(client)
 
+        self._any_notification.clear()
         await client.start_notify(NOTIFY_CHAR_UUID, self._on_notification)
-        await self._async_handshake(client)
-        _LOGGER.debug("%s: handshake complete, waiting for telemetry", self._name)
+        terminator = await self._async_handshake(client)
+
+        # The write characteristic is write-without-response, so a command the
+        # battery rejects is discarded silently. The only evidence a handshake
+        # was understood is the battery answering at all -- an ASCII MST+ reply
+        # counts, even though it yields no frames.
+        try:
+            await asyncio.wait_for(
+                self._any_notification.wait(), timeout=HANDSHAKE_REPLY_TIMEOUT
+            )
+        except TimeoutError:
+            _LOGGER.warning(
+                "%s: silent after handshake with terminator %r; trying the next "
+                "variant on the next attempt",
+                self._name,
+                terminator,
+            )
+            return
+
+        if not self._terminator_locked:
+            self._terminator_locked = True
+            _LOGGER.info(
+                "%s: battery answered with terminator %r", self._name, terminator
+            )
 
         # Hold the connection open until it drops or the stream goes stale.
         while not self._stopping:
@@ -222,22 +255,44 @@ class TempraBleDevice:
                 continue
             return
 
-    async def _async_handshake(self, client: BleakClientWithServiceCache) -> None:
+    async def _async_pair(self, client: BleakClientWithServiceCache) -> None:
+        """Best-effort pairing before the handshake.
+
+        "AEN" reads as Auth ENable, and iOS pairs on its own the moment a
+        characteristic demands it -- so the captures would not show a pairing
+        step even if the battery requires an encrypted link. On BlueZ nothing
+        pairs implicitly, which would leave every write silently discarded.
+        Failures here are not fatal: plenty of adapters and devices refuse or
+        do not need it.
+        """
+        try:
+            paired = await client.pair()
+        except (BleakError, NotImplementedError, EOFError, OSError) as err:
+            _LOGGER.debug("%s: pairing unavailable (%s)", self._name, err)
+        else:
+            _LOGGER.debug("%s: pairing returned %s", self._name, paired)
+
+    async def _async_handshake(self, client: BleakClientWithServiceCache) -> str:
         """Run the mandatory command sequence that unlocks the data stream.
 
         Order matters and the delays are deliberate -- the Dometic app spaces
         the writes the same way, and without ``APP+DAT`` the notify channel
         stays silent.
         """
+        if not self._terminator_locked:
+            self._terminator_index = self._attempt % len(HANDSHAKE_TERMINATORS)
+        terminator = HANDSHAKE_TERMINATORS[self._terminator_index]
+
         last = len(HANDSHAKE_COMMANDS) - 1
         for index, template in enumerate(HANDSHAKE_COMMANDS):
-            command = template.format(token=self._auth_token)
-            _LOGGER.debug("%s: -> %s", self._name, command)
+            command = template.format(token=self._auth_token) + terminator
+            _LOGGER.debug("%s: -> %r", self._name, command)
             await client.write_gatt_char(WRITE_CHAR_UUID, command.encode("ascii"))
             if index != last:
                 # No trailing delay: the battery drops an idle session quickly,
-                # so the stream should get every second it can.
+                # so the stream should get every millisecond it can.
                 await asyncio.sleep(HANDSHAKE_DELAY)
+        return terminator
 
     async def _async_disconnect(self) -> None:
         client, self._client = self._client, None
@@ -275,6 +330,7 @@ class TempraBleDevice:
         _LOGGER.debug(
             "%s: <- %s %s %r", self._name, sender.uuid, raw.hex(" "), raw
         )
+        self._any_notification.set()
 
         changed: dict[str, object] = {}
         undecoded: dict[int, str] | None = None

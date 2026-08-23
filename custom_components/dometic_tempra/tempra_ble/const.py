@@ -37,9 +37,24 @@ LOCAL_NAME_PATTERN: Final = "KAA_*_TLB150"
 #: future capture shows a different value.
 DEFAULT_AUTH_TOKEN: Final = "f560f1deba"
 
-#: The app spaces its handshake writes out; without the gaps the battery
-#: drops commands (presumably a write-queue overflow on its side).
-HANDSHAKE_DELAY: Final = 0.3
+#: Gap between handshake writes. The handover suggested 0.3 s, but a real
+#: battery hangs up about 1.2 s after connecting, and five writes at 0.3 s do
+#: not fit in that window -- two of three batteries were dropped before the
+#: sequence finished. Keep the whole sequence comfortably under a second.
+HANDSHAKE_DELAY: Final = 0.12
+
+#: Command terminators to try, one per connection attempt, until the battery
+#: answers. The captures show the payload without a terminator, but a
+#: PacketLogger trace does not necessarily render a trailing CR/LF -- and the
+#: 0x14 register returning ASCII "NNN\n" proves the protocol uses newlines
+#: somewhere. Since the write characteristic is write-without-response, a
+#: rejected command is silently discarded, so this cannot be told apart from a
+#: wrong terminator except by trying.
+HANDSHAKE_TERMINATORS: Final = ("", "\r\n", "\n", "\r")
+
+#: How long to wait for the battery to say anything at all after a handshake
+#: before treating that attempt's variant as wrong.
+HANDSHAKE_REPLY_TIMEOUT: Final = 6.0
 
 #: The handshake in the order the Dometic app sends it. ``APP+IMP`` is step 4
 #: of the documented sequence; the handover pseudocode left it out, and the
