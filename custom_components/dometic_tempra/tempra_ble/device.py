@@ -52,9 +52,13 @@ from .parser import FrameStream, decode_frame
 
 _LOGGER = logging.getLogger(__name__)
 
-#: Backoff bounds after a failed poll, seconds.
-_BACKOFF_START = 10.0
-_BACKOFF_MAX = 180.0
+#: Backoff bounds after a failed poll, seconds. Never back off past the normal
+#: poll interval: these are local devices on a marginal link where roughly half
+#: of all attempts fail, and the fix for a lost round is another attempt soon,
+#: not a long wait. Backing off to three minutes just left a battery
+#: unavailable while its siblings had the radio to themselves.
+_BACKOFF_START = 5.0
+_BACKOFF_MAX = POLL_INTERVAL
 
 
 class TempraBleDevice:
