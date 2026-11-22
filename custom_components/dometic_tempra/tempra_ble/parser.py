@@ -21,12 +21,14 @@ from .const import (
     CMD_SOH,
     CMD_VOLTAGE_CURRENT,
     FRAME_LEN,
+    FRAME_SYNC,
+    FRAME_TYPE_BATTERY,
+    FRAME_TYPES,
     MAX_CAPACITY_AH,
     MAX_CELL_MV,
     MAX_PACK_CURRENT,
     MAX_PACK_VOLTAGE,
     MIN_CELL_MV,
-    SYNC_HEADER,
 )
 
 #: Cap on buffered bytes. A frame is 8 bytes and notifications are small; this
@@ -37,14 +39,36 @@ _MAX_BUFFER = 512
 
 @dataclass(frozen=True, slots=True)
 class Frame:
-    """One decoded-from-the-wire telemetry frame."""
+    """One decoded-from-the-wire telemetry frame.
+
+    Layout ``23 <type> <node> <cmd> <payload:4>``. ``type_`` is the byte after
+    the sync (``0x85`` battery registers, ``0x4D`` the second stream); only
+    battery frames carry decodable measurements. ``node`` is the N-BUS address
+    of the battery the frame came from -- a single BLE connection to the bus
+    master relays every battery on the bus, so frames must be grouped by node
+    before decoding, or two batteries' values get blended into one.
+    """
 
     cmd: int
     payload: bytes
+    node: int = 0
+    type_: int = FRAME_TYPE_BATTERY
+
+    @property
+    def is_battery(self) -> bool:
+        """Whether this frame carries battery registers (type ``0x85``)."""
+        return self.type_ == FRAME_TYPE_BATTERY
 
 
 class FrameStream:
-    """Reassembles notify chunks into frames, resyncing on the sync header."""
+    """Reassembles notify chunks into 8-byte frames.
+
+    Frames are a back-to-back grid of 8-byte records, each starting with the
+    single sync byte ``0x23``. We lock to that grid: once aligned we consume
+    whole records; a record whose type byte is unknown, or that is not followed
+    by another ``0x23``, means we are mis-aligned, so we resync on the next
+    ``0x23``. (ASCII handshake replies carry no ``0x23`` and are discarded.)
+    """
 
     def __init__(self) -> None:
         self._buf = bytearray()
@@ -56,23 +80,41 @@ class FrameStream:
             del self._buf[: len(self._buf) - _MAX_BUFFER]
 
         frames: list[Frame] = []
-        while True:
-            index = self._buf.find(SYNC_HEADER)
-            if index < 0:
-                # No header in the buffer. A header may still straddle the next
-                # notification, so keep the last two bytes and drop the rest
-                # (ASCII handshake replies land here and are discarded).
-                keep = len(SYNC_HEADER) - 1
-                if len(self._buf) > keep:
-                    del self._buf[: len(self._buf) - keep]
-                break
-            if index:
-                del self._buf[:index]
-            if len(self._buf) < FRAME_LEN:
-                break
-            frames.append(Frame(cmd=self._buf[3], payload=bytes(self._buf[4:FRAME_LEN])))
+        while len(self._buf) >= FRAME_LEN:
+            if self._buf[0] != FRAME_SYNC or self._buf[1] not in FRAME_TYPES:
+                if not self._resync():
+                    break
+                continue
+            # Alignment check: the next record must also start on the grid. If
+            # we cannot see the next byte yet, accept optimistically -- the type
+            # byte already passed, and a wrong guess self-corrects next record.
+            if len(self._buf) > FRAME_LEN and self._buf[FRAME_LEN] != FRAME_SYNC:
+                if not self._resync():
+                    break
+                continue
+            frames.append(
+                Frame(
+                    type_=self._buf[1],
+                    node=self._buf[2],
+                    cmd=self._buf[3],
+                    payload=bytes(self._buf[4:FRAME_LEN]),
+                )
+            )
             del self._buf[:FRAME_LEN]
         return frames
+
+    def _resync(self) -> bool:
+        """Drop to the next plausible frame start. True if one may remain."""
+        index = self._buf.find(FRAME_SYNC, 1)
+        if index < 0:
+            # Keep a trailing byte only if it could be a sync starting a frame
+            # that continues in the next notification.
+            tail = 1 if self._buf and self._buf[-1] == FRAME_SYNC else 0
+            if len(self._buf) > tail:
+                del self._buf[: len(self._buf) - tail]
+            return False
+        del self._buf[:index]
+        return len(self._buf) >= FRAME_LEN
 
     def reset(self) -> None:
         """Drop buffered bytes, e.g. after a reconnect."""
