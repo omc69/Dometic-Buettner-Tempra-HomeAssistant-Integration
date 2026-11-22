@@ -136,3 +136,38 @@ def test_stream_does_not_grow_without_bound() -> None:
     for _ in range(100):
         stream.feed(b"\x00" * 64)
     assert len(stream._buf) < 512  # noqa: SLF001
+
+
+def test_capacity_is_not_eaten_by_the_next_frames_sync() -> None:
+    """The real TLB100 bug: a two-byte sync read the following frame's 0x23
+    as this frame's capacity byte, yielding 0x23 = 35 Ah instead of 100."""
+    stream = FrameStream()
+    # 100 Ah capacity frame, immediately followed by a second-stream frame.
+    wire = bytes.fromhex("2385000700000064") + bytes.fromhex("234d09b1d4b4d489")
+    frames = stream.feed(wire)
+    battery = [f for f in frames if f.is_battery]
+    assert len(battery) == 1
+    assert decode_frame(battery[0]) == {"capacity_ah": 100}
+
+
+def test_second_stream_is_flagged_not_a_battery() -> None:
+    """Type 0x4D frames must be marked non-battery so the device layer cannot
+    mistake them for a second battery node."""
+    stream = FrameStream()
+    frames = stream.feed(
+        bytes.fromhex("234d09b1d4b4d489") + bytes.fromhex("2385000b64ffffff")
+    )
+    kinds = {(f.type_, f.is_battery) for f in frames}
+    assert (0x4D, False) in kinds
+    assert (0x85, True) in kinds
+
+
+def test_misaligned_notification_recovers_a_clean_capacity() -> None:
+    """A notification that starts mid-frame (stray leading 0x23, a truncated
+    frame, then a clean one) must still yield the clean capacity, never 35."""
+    stream = FrameStream()
+    # verbatim shape of a real capture: stray 23, a 7-byte 0x0C remainder,
+    # then the full 100 Ah capacity frame.
+    frames = stream.feed(bytes.fromhex("23238500" "0c0262ff" "2385000700000064"))
+    caps = [decode_frame(f) for f in frames if f.is_battery and f.cmd == 0x07]
+    assert {"capacity_ah": 100} in caps

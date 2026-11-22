@@ -17,12 +17,11 @@ from homeassistant.const import (
     UnitOfElectricPotential,
     UnitOfPower,
 )
-from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
-from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
-from .bank import BankState, TempraBank, async_get_bank
+from .bank import BankState, compute_bank
 from .const import DOMAIN, MANUFACTURER
 from .coordinator import TempraConfigEntry, TempraCoordinator
 from .entity import TempraEntity
@@ -181,58 +180,75 @@ async def async_setup_entry(
     entry: TempraConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    """Set up the Tempra sensors."""
+    """Set up the bank sensors now and each battery's sensors as it appears."""
     coordinator = entry.runtime_data
-    entities: list[Entity] = [
-        TempraSensor(coordinator, description) for description in SENSORS
-    ]
 
-    bank = async_get_bank(hass)
-    entry.async_on_unload(bank.register(entry.entry_id, coordinator))
-    if bank.claim(entry.entry_id):
-        entities.extend(
-            TempraBankSensor(bank, description) for description in BANK_SENSORS
+    # The bank exists from the start; it simply reports nothing until a battery
+    # is online. Its unique_ids are unchanged so history carries over.
+    async_add_entities(
+        TempraBankSensor(coordinator, description) for description in BANK_SENSORS
+    )
+
+    added: set[int] = set()
+
+    @callback
+    def _add_node(node: int) -> None:
+        if node in added:
+            return
+        added.add(node)
+        async_add_entities(
+            TempraSensor(coordinator, node, description) for description in SENSORS
         )
 
-    async_add_entities(entities)
+    # Fires once per battery node, replaying any already discovered.
+    coordinator.device.set_new_node_callback(_add_node)
+    entry.async_on_unload(lambda: coordinator.device.set_new_node_callback(None))
 
 
 class TempraSensor(TempraEntity, SensorEntity):
-    """A single measurement of a Tempra battery."""
+    """A single measurement of one battery on the bus."""
 
     entity_description: TempraSensorDescription
 
     def __init__(
-        self, coordinator: TempraCoordinator, description: TempraSensorDescription
+        self,
+        coordinator: TempraCoordinator,
+        node: int,
+        description: TempraSensorDescription,
     ) -> None:
         """Initialise the sensor."""
-        super().__init__(coordinator)
+        super().__init__(coordinator, node)
         self.entity_description = description
-        self._attr_unique_id = f"{coordinator.device.address}_{description.key}"
+        self._attr_unique_id = (
+            f"{coordinator.device.address}_{node:02x}_{description.key}"
+        )
 
     @property
     def native_value(self) -> float | int | None:
         """Return the current measurement."""
-        return getattr(self.coordinator.data, self.entity_description.field)
+        state = self._state
+        if state is None:
+            return None
+        return getattr(state, self.entity_description.field)
 
     @property
     def available(self) -> bool:
-        """A measurement is available once the battery has sent it at least once."""
+        """A measurement is available once the battery has sent it."""
         return super().available and self.native_value is not None
 
 
 class TempraBankSensor(SensorEntity):
-    """An aggregate reading across every battery in the bank."""
+    """An aggregate reading across every battery on the bus."""
 
     _attr_has_entity_name = True
     _attr_should_poll = False
     entity_description: TempraSensorDescription
 
     def __init__(
-        self, bank: TempraBank, description: TempraSensorDescription
+        self, coordinator: TempraCoordinator, description: TempraSensorDescription
     ) -> None:
         """Initialise the sensor."""
-        self._bank = bank
+        self._coordinator = coordinator
         self.entity_description = description
         self._attr_unique_id = f"{DOMAIN}_bank_{description.key}"
         self._attr_device_info = DeviceInfo(
@@ -241,17 +257,12 @@ class TempraBankSensor(SensorEntity):
             name="Tempra battery bank",
             entry_type=None,
         )
-        self._unsubscribe: CALLBACK_TYPE | None = None
 
     async def async_added_to_hass(self) -> None:
-        """Follow every battery in the bank."""
-        self._unsubscribe = self._bank.add_listener(self._handle_update)
-
-    async def async_will_remove_from_hass(self) -> None:
-        """Stop following the bank."""
-        if self._unsubscribe is not None:
-            self._unsubscribe()
-            self._unsubscribe = None
+        """Follow the shared coordinator."""
+        self.async_on_remove(
+            self._coordinator.async_add_listener(self._handle_update)
+        )
 
     @callback
     def _handle_update(self) -> None:
@@ -259,7 +270,7 @@ class TempraBankSensor(SensorEntity):
 
     @property
     def _state(self) -> BankState:
-        return self._bank.state
+        return compute_bank(self._coordinator.device)
 
     @property
     def available(self) -> bool:

@@ -27,11 +27,42 @@ NOTIFY_CHAR_UUID: Final = "00000002-0000-1000-8000-008025000000"
 SESSION_CHAR_UUID: Final = "00000003-0000-1000-8000-008025000000"
 SESSION_OPEN_VALUE: Final = b"\xc8"
 
-#: Indicate characteristic. Subscribing here is what unlocks the session: the
-#: battery answers immediately with a single 8E indication, and only after that
-#: does it accept the C8 session write and the APP+ commands. Confirmed in the
-#: iOS captures. The app never touches 0x000A, so neither do we.
+#: TX-credits characteristic (indicate). This is the heart of the Telit TIO
+#: credit-based flow control the battery actually speaks: the battery indicates
+#: here how many packets we are allowed to send it. The "8E" (=142) seen in the
+#: iOS captures is such a credit grant, not an opaque unlock byte. We must
+#: accumulate these credits and never write a command while we hold none.
 INDICATE_CHAR_UUID: Final = "00000004-0000-1000-8000-008025000000"
+TX_CREDITS_CHAR_UUID: Final = INDICATE_CHAR_UUID
+
+#: RX-credits characteristic (write-with-response). We write a single byte here
+#: granting the battery permission to send us that many more packets. The "C8"
+#: (=200) the app writes is exactly this initial grant, not a magic session
+#: opener. We top it up whenever our granted budget runs low.
+RX_CREDITS_CHAR_UUID: Final = SESSION_CHAR_UUID
+
+#: TX-MTU characteristic (indicate). The app subscribes to it as part of the
+#: working handshake; the battery drops a marginal link that never does. We
+#: subscribe and otherwise ignore it -- our commands are a handful of bytes.
+TX_MTU_CHAR_UUID: Final = "0000000a-0000-1000-8000-008025000000"
+
+#: Initial number of inbound packets we grant the battery (byte on RX credits).
+#: Matches the current Dometic app (0xFF); the exact value is not critical as
+#: long as it is non-zero and refilled before it drains.
+INITIAL_LOCAL_CREDITS: Final = 0xFF
+
+#: Refill our inbound grant once the battery has spent down to this many.
+LOCAL_CREDIT_REFILL_THRESHOLD: Final = 32
+
+#: How long to wait for the battery to grant us outbound credits (its first
+#: TX-credits indication) before giving up on the poll.
+CREDIT_WAIT_TIMEOUT: Final = 6.0
+
+#: ASCII replies the battery sends during the handshake.
+REPLY_ACCESS_GRANTED: Final = "MST+AEN"
+REPLY_ACCESS_DENIED: Final = "MST+ANE"
+REPLY_NETWORK: Final = "MST+NET"
+REPLY_WAIT: Final = "MST+WAI"
 
 # --- Advertising -----------------------------------------------------------
 
@@ -40,10 +71,21 @@ LOCAL_NAME_PATTERN: Final = "KAA_*_TLB150"
 
 # --- Handshake -------------------------------------------------------------
 
-#: Auth token the Dometic app sends in every capture. Not verified to be
-#: device specific -- overridable via the integration options in case a
-#: future capture shows a different value.
-DEFAULT_AUTH_TOKEN: Final = "f560f1deba"
+#: Password Home Assistant claims the battery with. The battery stores exactly
+#: one password; when ``RESET_ON_ACCESS_DENIED`` is on we reset whatever is
+#: stored and set this, so from then on Home Assistant owns the battery (the
+#: Dometic app then has to be re-paired to take it back). 15 chars from the
+#: app's own alphabet [0-9a-z], so the firmware accepts it like an app token.
+DEFAULT_AUTH_TOKEN: Final = "homeassistant01"
+
+#: Reset the stored password when the battery denies access (MST+ANE), then
+#: re-claim it with DEFAULT_AUTH_TOKEN. This takes the battery away from the
+#: Dometic phone app, which is what the owner asked for.
+RESET_ON_ACCESS_DENIED: Final = True
+
+#: Command that clears the battery's stored password (the app's "RESET
+#: PASSWORD"). After it, the next APP+AEN sets a fresh password.
+CMD_RESET_PASSWORD: Final = "APP+RPA"
 
 #: Pause after the session write, before the first command. The app waits
 #: about 0.55 s here.
@@ -77,21 +119,26 @@ SNAPSHOT_TIMEOUT: Final = 20.0
 #: is plenty and keeps the radio quiet the rest of the time.
 POLL_INTERVAL: Final = 60.0
 
-#: Entities stay available this long after the last complete reading, so a
-#: single missed turn does not blank the dashboard.
-DATA_STALE_AFTER: Final = 300.0
+#: Entities stay available this long after the last sign of life, so a few
+#: missed or failed polls do not blank the dashboard. A battery at rest barely
+#: changes, so a generous window is safe and keeps a slow relayed sibling from
+#: flickering out between the polls that refresh it.
+DATA_STALE_AFTER: Final = 600.0
 
-#: The handshake, trimmed to what actually starts the stream. ``{token}`` is
-#: substituted with the auth token.
-#:
-#: The app also sends ``APP+IMP`` and ``APP+RDN=1``, but the captures show
-#: telemetry already flowing before either goes out, and ``APP+IMP`` draws
-#: sixteen sequential ``MST+IMP=`` replies. On a marginal link that burns the
-#: seconds a snapshot needs, so neither is sent.
+#: Handshake commands. Unlike the old fixed sequence these are now driven by
+#: the battery's ASCII replies (see device.py): we send AEN, wait for MST+AEN,
+#: send NET, wait for MST+NET, then DAT (which starts the binary stream) and
+#: RDN=1 (which keeps the real-time stream alive, as the app does).
+CMD_ACCESS: Final = "APP+AEN={token}"
+CMD_NETWORK: Final = "APP+NET"
+CMD_DATA: Final = "APP+DAT"
+CMD_REALTIME_START: Final = "APP+RDN=1"
+
+#: Kept for backward compatibility with the standalone dump tool.
 HANDSHAKE_COMMANDS: Final = (
-    "APP+AEN={token}",
-    "APP+NET",
-    "APP+DAT",
+    CMD_ACCESS,
+    CMD_NETWORK,
+    CMD_DATA,
 )
 
 #: Attempts for the session write. A link at -80 dBm sometimes rejects the
@@ -100,10 +147,30 @@ SESSION_WRITE_ATTEMPTS: Final = 3
 
 # --- Binary framing --------------------------------------------------------
 
-#: Fixed sync header preceding every telemetry frame.
-SYNC_HEADER: Final = b"\x23\x85\xcf"
+#: Every telemetry frame is 8 bytes and begins with the single sync byte
+#: ``0x23`` -- exactly what the Dometic app locks onto. The byte *after* the
+#: sync is a stream *type*, not a constant: ``0x85`` is the battery-register
+#: stream, ``0x4D`` a second interleaved stream (per-cell / bus-management,
+#: not yet decoded). An earlier version treated ``23 85`` as a fixed two-byte
+#: sync; that is wrong -- back-to-back frames put a ``0x23`` right after the
+#: payload, so the two-byte matcher ate the next frame's sync byte into this
+#: frame's payload (reading capacity as 0x23 = 35 instead of 0x64 = 100) and
+#: mis-grouped the ``0x4D`` stream into phantom battery nodes. We sync on the
+#: single ``0x23`` and lock to the 8-byte grid instead.
+FRAME_SYNC: Final = 0x23
 
-#: ``23 85 CF <cmd:1> <payload:4>``
+#: Known stream types (the byte after the sync).
+FRAME_TYPE_BATTERY: Final = 0x85  # battery registers: V/I, SoC, SoH, cells, ...
+FRAME_TYPE_AUX: Final = 0x4D  # second stream, not yet decoded -- never a battery
+
+#: Stream types we accept as frame starts when locking to the grid. A ``0x23``
+#: followed by any other type byte is treated as a mis-sync and skipped.
+FRAME_TYPES: Final = frozenset({FRAME_TYPE_BATTERY, FRAME_TYPE_AUX})
+
+#: Retained for the standalone dump tool; the live parser no longer uses it.
+SYNC_HEADER: Final = b"\x23\x85"
+
+#: ``23 <type:1> <node:1> <cmd:1> <payload:4>``
 FRAME_LEN: Final = 8
 PAYLOAD_LEN: Final = 4
 
